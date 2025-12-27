@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FileManager</string>
+    <string name="accessibility_description">Enables automated cache clearing in system settings.</string>
+</resources>
