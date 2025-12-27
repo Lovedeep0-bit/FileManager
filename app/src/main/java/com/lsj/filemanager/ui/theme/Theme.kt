@@ -1,4 +1,5 @@
 package com.lsj.filemanager.ui.theme
+import android.graphics.drawable.ColorDrawable
 
 import android.app.Activity
 import android.os.Build
@@ -78,6 +79,7 @@ fun FileManagerTheme(
             val isLight = appTheme == AppTheme.LIGHT
             insetsController.isAppearanceLightStatusBars = isLight
             insetsController.isAppearanceLightNavigationBars = isLight
+            window.setBackgroundDrawable(ColorDrawable(colorScheme.background.toArgb()))
         }
     }
 

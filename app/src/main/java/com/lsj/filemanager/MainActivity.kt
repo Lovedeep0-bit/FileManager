@@ -64,50 +64,54 @@ class MainActivity : ComponentActivity() {
                 val currentTheme by viewModel.currentTheme.collectAsState()
                 
                 FileManagerTheme(appTheme = currentTheme) {
-                    val navController = rememberNavController()
-                    val context = LocalContext.current
-                    val versionName = remember {
-                        try {
-                            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                        } catch (e: Exception) {
-                            "1.1"
-                        }
-                    }
-                    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-                    val scope = rememberCoroutineScope()
-                    val navBackStackEntry by navController.currentBackStackEntryAsState()
-                    val currentRoute = navBackStackEntry?.destination?.route
-                    val currentCategoryArg = navBackStackEntry?.arguments?.getString("category")
-                    
-                    var showPermissionDialog by remember { 
-                        mutableStateOf(!PermissionManager.hasAllFilesAccess(context)) 
-                    }
-    
-                    if (showPermissionDialog) {
-                        AlertDialog(
-                            onDismissRequest = { /* Don't dismiss on click outside */ },
-                            title = { Text("App needs access to manage all files.") },
-                            text = { Text("Please allow the access in the upcoming system setting.") },
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    showPermissionDialog = false
-                                    PermissionManager.launchManageAllFilesSettings(context)
-                                }) {
-                                    Text("OK")
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { 
-                                    showPermissionDialog = false
-                                }) {
-                                    Text("Cancel")
-                                }
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        val navController = rememberNavController()
+                        val context = LocalContext.current
+                        val versionName = remember {
+                            try {
+                                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                            } catch (e: Exception) {
+                                "1.1"
                             }
-                        )
-                    }
-    
-    
-                    ModalNavigationDrawer(
+                        }
+                        val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+                        val scope = rememberCoroutineScope()
+                        val navBackStackEntry by navController.currentBackStackEntryAsState()
+                        val currentRoute = navBackStackEntry?.destination?.route
+                        val currentCategoryArg = navBackStackEntry?.arguments?.getString("category")
+                        
+                        var showPermissionDialog by remember { 
+                            mutableStateOf(!PermissionManager.hasAllFilesAccess(context)) 
+                        }
+        
+                        if (showPermissionDialog) {
+                            AlertDialog(
+                                onDismissRequest = { /* Don't dismiss on click outside */ },
+                                title = { Text("App needs access to manage all files.") },
+                                text = { Text("Please allow the access in the upcoming system setting.") },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        showPermissionDialog = false
+                                        PermissionManager.launchManageAllFilesSettings(context)
+                                    }) {
+                                        Text("OK")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { 
+                                        showPermissionDialog = false
+                                    }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
+        
+        
+                        ModalNavigationDrawer(
                         drawerState = drawerState,
                         drawerContent = {
                             ModalDrawerSheet(
@@ -283,6 +287,7 @@ class MainActivity : ComponentActivity() {
                                     onNavigateBack = { navController.popBackStack() }
                                 )
                             }
+                        }
                     }
                 }
 
