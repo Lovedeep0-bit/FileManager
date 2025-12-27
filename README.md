@@ -1,4 +1,4 @@
-# FileManager Plus
+# FileManager
 
 A clean, modern file manager for Android focusing on privacy and smooth organization.
 
