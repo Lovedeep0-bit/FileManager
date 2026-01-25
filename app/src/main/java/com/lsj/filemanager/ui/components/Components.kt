@@ -226,9 +226,8 @@ fun FileActionSheet(
         )
         HorizontalDivider()
         
-        val isZip = file.extension.lowercase() == "zip"
+        val isArchive = file.extension.lowercase() in listOf("zip", "7z", "rar")
         val isApp = file.packageName != null
-        
         val actions = mutableListOf<Pair<FileAction, Pair<ImageVector, String>>>()
         
         if (isApp) {
@@ -238,7 +237,7 @@ fun FileActionSheet(
             }
             actions.add(FileAction.CLEAR_CACHE to (Icons.Default.AutoFixHigh to "Clear Cache"))
         } else {
-            if (isZip) {
+            if (isArchive) {
                 actions.add(FileAction.OPEN_AS_ARCHIVE to (Icons.Default.Visibility to "View contents"))
                 actions.add(FileAction.EXTRACT to (Icons.Default.Unarchive to "Extract here"))
                 actions.add(FileAction.EXTRACT_TO_FOLDER to (Icons.Default.CreateNewFolder to "Extract to folder"))
@@ -357,6 +356,13 @@ fun InformationDialog(
     val context = androidx.compose.ui.platform.LocalContext.current
     val dateFormat = java.text.SimpleDateFormat("dd/MM/yy h:mm a", java.util.Locale.getDefault())
     fun formatSize(size: Long) = android.text.format.Formatter.formatFileSize(context, size)
+    fun formatDuration(durationMs: Long): String {
+        val seconds = (durationMs / 1000) % 60
+        val minutes = (durationMs / (1000 * 60)) % 60
+        val hours = (durationMs / (1000 * 60 * 60))
+        return if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, seconds)
+               else String.format("%02d:%02d", minutes, seconds)
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -370,15 +376,22 @@ fun InformationDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 InfoRow(label = "Name", value = file.name)
                 InfoRow(label = "Path", value = file.path)
-                if (!file.isDirectory) {
-                    InfoRow(label = "Size", value = formatSize(file.size))
+                InfoRow(label = "Size", value = formatSize(file.size))
+                if (file.isDirectory) {
+                    InfoRow(label = "Items", value = "${file.itemCount} items")
                 }
                 InfoRow(label = "Last modified", value = dateFormat.format(java.util.Date(file.lastModified)))
-                if (file.extraInfo.isNotEmpty()) {
+                
+                if (file.duration != null) {
+                    InfoRow(label = "Duration", value = formatDuration(file.duration))
+                }
+                
+                if (file.resolution != null) {
+                    InfoRow(label = "Resolution", value = file.resolution)
+                }
+
+                if (file.extraInfo.isNotEmpty() && file.duration == null && file.resolution == null) {
                     val label = when (file.extension.lowercase()) {
-                        "mp3", "wav", "m4a", "ogg", "aac", "flac" -> "Duration"
-                        "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "3gp" -> "Duration"
-                        "jpg", "jpeg", "png", "webp", "gif", "bmp" -> "Resolution"
                         "apk" -> "Version"
                         else -> "Details"
                     }

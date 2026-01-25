@@ -18,7 +18,9 @@ data class FileModel(
     val extraInfo: String = "",
     val packageName: String? = null,
     val isSystemApp: Boolean = false,
-    val appIconPackageName: String? = null // Package name for loading app icon
+    val appIconPackageName: String? = null, // Package name for loading app icon
+    val duration: Long? = null,
+    val resolution: String? = null
 ) {
     val isArchive: Boolean
         get() = extension.lowercase() in listOf("zip", "rar", "7z", "tar", "gz")
@@ -33,7 +35,7 @@ fun File.toFileModel(showHidden: Boolean = false): FileModel {
         lastModified = this.lastModified(),
         isDirectory = isDir,
         extension = this.extension,
-        itemCount = if (isDir) this.listFiles()?.count { showHidden || (!it.isHidden && !it.name.startsWith(".")) } ?: 0 else 0
+        itemCount = if (isDir) this.list()?.count { showHidden || !it.startsWith(".") } ?: 0 else 0
     )
 }
 

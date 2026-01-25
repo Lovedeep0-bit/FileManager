@@ -12,8 +12,8 @@ android {
         applicationId = "com.lsj.filemanager"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
     implementation(libs.commons.compress)
+    implementation(libs.xz)
 
 
     testImplementation(libs.junit)

@@ -7,6 +7,9 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import android.media.MediaMetadataRetriever
+import android.graphics.BitmapFactory
+import android.webkit.MimeTypeMap
 
 class FileRepository {
 
@@ -204,51 +207,83 @@ class FileRepository {
     }
 
     suspend fun listFiles(path: String, showHidden: Boolean = false): List<FileModel> = withContext(Dispatchers.IO) {
-        val root = File(path)
-        if (root.exists() && root.isDirectory) {
-            root.listFiles()?.filter { showHidden || (!it.isHidden && !it.name.startsWith(".")) }?.map { file ->
-                val model = file.toFileModel(showHidden)
-                val ext = model.extension.lowercase()
-                if (!model.isDirectory) {
-                    when {
-                        ext in listOf("jpg", "jpeg", "png", "webp", "gif") -> {
-                            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)
-                            if (options.outWidth != -1 && options.outHeight != -1) {
-                                model.copy(extraInfo = "${options.outWidth}x${options.outHeight}")
-                            } else model
-                        }
-                        ext in listOf("mp3", "wav", "m4a", "ogg", "mp4", "mkv", "avi") -> {
-                            val retriever = android.media.MediaMetadataRetriever()
-                            try {
-                                retriever.setDataSource(file.absolutePath)
-                                val time = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
-                                val durationMs = time?.toLongOrNull() ?: 0L
-                                if (durationMs > 0) {
-                                    val seconds = (durationMs / 1000) % 60
-                                    val minutes = (durationMs / (1000 * 60)) % 60
-                                    val hours = (durationMs / (1000 * 60 * 60))
-                                    val durationStr = if (hours > 0) String.format("%02d:%02d:%02d", hours, minutes, seconds)
-                                                      else String.format("%02d:%02d", minutes, seconds)
-                                    model.copy(extraInfo = durationStr)
-                                } else model
-                            } catch (e: Exception) {
-                                model
-                            } finally {
-                                retriever.release()
-                            }
-                        }
-                        else -> model
-                    }
-                } else {
+        try {
+            val root = File(path)
+            if (root.exists() && root.isDirectory) {
+                root.listFiles()?.filter { showHidden || (!it.isHidden && !it.name.startsWith(".")) }?.map { file ->
+                    val model = file.toFileModel(showHidden)
+                    // Optimization: Skip expensive metadata extraction (images/video duration)
+                    // This makes loading instant even for thousands of files.
+                    // UI (Coil) handles image display, and video duration is "nice to have" but not worth the lag.
                     model
-                }
 
-            }?.sortedWith(
-                compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() }
-            ) ?: emptyList()
-        } else {
+                }?.sortedWith(
+                    compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() }
+                ) ?: emptyList()
+            } else {
+                emptyList()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
             emptyList()
+        }
+    }
+
+    suspend fun getDetailedMetadata(file: FileModel): FileModel = withContext(Dispatchers.IO) {
+        try {
+            val f = File(file.path)
+            if (!f.exists()) return@withContext file
+
+            if (f.isDirectory) {
+                var totalSize = 0L
+                f.walkTopDown().forEach { child ->
+                    if (child.isFile) {
+                        totalSize += child.length()
+                    }
+                    yield()
+                }
+                return@withContext file.copy(size = totalSize)
+            }
+
+            val ext = file.extension.lowercase()
+            var duration: Long? = null
+            var resolution: String? = null
+
+            when (ext) {
+                "mp3", "wav", "m4a", "ogg", "aac", "flac", "mp4", "mkv", "avi", "mov", "flv", "wmv", "webm", "3gp" -> {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(file.path)
+                        duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                        if (width != null && height != null) {
+                            resolution = "${width}x${height}"
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    } finally {
+                        retriever.release()
+                    }
+                }
+                "jpg", "jpeg", "png", "webp", "gif", "bmp" -> {
+                    val options = BitmapFactory.Options()
+                    options.inJustDecodeBounds = true
+                    BitmapFactory.decodeFile(file.path, options)
+                    if (options.outWidth != -1 && options.outHeight != -1) {
+                        resolution = "${options.outWidth}x${options.outHeight}"
+                    }
+                }
+            }
+
+            file.copy(
+                duration = duration,
+                resolution = resolution,
+                mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: ""
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            file
         }
     }
 
@@ -353,20 +388,13 @@ class FileRepository {
         }
     }
 
-    suspend fun zipFiles(paths: List<String>, zipPath: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val zipFile = File(zipPath)
-            org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream(zipFile).use { zos ->
-                paths.forEach { path ->
-                    val file = File(path)
-                    addFileToZip(zos, file, "")
-                }
-            }
-            true
-        } catch (e: Exception) {
-            false
-        }
-    }
+    // Simplified version redundant with createArchive, but kept if needed by other paths (will refactor VM mainly)
+    // Actually, let's remove it or redirect it?
+    // It was used by 'zipFiles' without progress, but let's just make createArchive the main one.
+    // I will remove the old 'zipFiles' method that didn't take progress if it exists, or update it.
+    // Checking file... line 330 was 'zipFiles(paths, zipPath)'. Use createArchive instead.
+    
+    suspend fun createArchiveSimple(paths: List<String>, zipPath: String): Boolean = createArchive(paths, zipPath)
 
     private fun addFileToZip(zos: org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream, file: File, parentPath: String) {
         val entryName = if (parentPath.isEmpty()) file.name else "$parentPath/${file.name}"
@@ -384,26 +412,31 @@ class FileRepository {
     }
 
     suspend fun searchFiles(query: String, showHidden: Boolean = false, rootPath: String = "/storage/emulated/0"): List<FileModel> = withContext(Dispatchers.IO) {
-        if (query.length < 2) return@withContext emptyList()
-        val root = File(rootPath)
-        val results = mutableListOf<FileModel>()
-        
-        fun walk(file: File) {
-            if (results.size >= 100) return
-            // Explicitly check for hidden files/dirs (dot prefix or OS attribute)
-            val isHidden = file.isHidden || file.name.startsWith(".")
-            if (!showHidden && isHidden) return
+        try {
+            if (query.length < 2) return@withContext emptyList()
+            val root = File(rootPath)
+            val results = mutableListOf<FileModel>()
+            
+            fun walk(file: File) {
+                if (results.size >= 100) return
+                // Explicitly check for hidden files/dirs (dot prefix or OS attribute)
+                val isHidden = file.isHidden || file.name.startsWith(".")
+                if (!showHidden && isHidden) return
 
-            if (file.name.contains(query, ignoreCase = true)) {
-                results.add(file.toFileModel(showHidden))
+                if (file.name.contains(query, ignoreCase = true)) {
+                    results.add(file.toFileModel(showHidden))
+                }
+                if (file.isDirectory) {
+                    file.listFiles()?.forEach { walk(it) }
+                }
             }
-            if (file.isDirectory) {
-                file.listFiles()?.forEach { walk(it) }
-            }
+            
+            walk(root)
+            results.sortedBy { it.name.lowercase() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyList()
         }
-        
-        walk(root)
-        results.sortedBy { it.name.lowercase() }
     }
 
     suspend fun getFilesByCategory(category: FileCategory, context: android.content.Context, rootPath: String = "/storage/emulated/0"): List<FileModel> = withContext(Dispatchers.IO) {
@@ -595,92 +628,169 @@ class FileRepository {
         }.sortedBy { it.name.lowercase() }
     }
 
-    suspend fun listZipContents(zipPath: String, internalPath: String = ""): List<FileModel> = withContext(Dispatchers.IO) {
+    suspend fun listArchiveContents(archivePath: String, internalPath: String = ""): List<FileModel> = withContext(Dispatchers.IO) {
         val results = mutableListOf<FileModel>()
         try {
-            val file = File(zipPath)
+            val file = File(archivePath)
             if (!file.exists()) return@withContext emptyList()
 
-            org.apache.commons.compress.archivers.zip.ZipFile(file).use { zip ->
-                val entries = zip.entries
-                val currentDirEntries = mutableSetOf<String>()
-
-                while (entries.hasMoreElements()) {
-                    val entry = entries.nextElement()
-                    val entryName = entry.name.removePrefix("/")
-                    
-                    // Filter entries belonging to the current internal path
-                    if (internalPath.isEmpty()) {
-                        // Root of zip
-                        val firstSlash = entryName.indexOf('/')
-                        if (firstSlash == -1) {
-                            // File in root
-                            if (!currentDirEntries.contains(entryName)) {
-                                results.add(FileModel(
-                                    name = entryName,
-                                    path = "$zipPath|/$entryName", // Special path format: realPath|/internalPath
-                                    size = entry.size,
-                                    lastModified = entry.time,
-                                    isDirectory = entry.isDirectory,
-                                    extension = if (entry.isDirectory) "" else entryName.substringAfterLast('.', ""),
-                                    extraInfo = if (entry.isDirectory) "" else "In Archive"
-                                ))
-                                currentDirEntries.add(entryName)
-                            }
-                        } else {
-                            // Folder in root
-                            val folderName = entryName.substring(0, firstSlash)
-                            if (!currentDirEntries.contains(folderName)) {
-                                results.add(FileModel(
-                                    name = folderName,
-                                    path = "$zipPath|/$folderName",
-                                    size = 0,
-                                    lastModified = entry.time,
-                                    isDirectory = true,
-                                    extraInfo = "In Archive"
-                                ))
-                                currentDirEntries.add(folderName)
-                            }
-                        }
-                    } else {
-                        // Inside subdirectory
-                        val prefix = "$internalPath/"
-                        if (entryName.startsWith(prefix) && entryName != prefix) {
-                            val relativeName = entryName.removePrefix(prefix)
-                            val firstSlash = relativeName.indexOf('/')
-                             if (firstSlash == -1) {
-                                // File in current dir
-                                if (!currentDirEntries.contains(relativeName)) {
+            val extension = file.extension.lowercase()
+            
+            if (extension == "7z") {
+                org.apache.commons.compress.archivers.sevenz.SevenZFile(file).use { sevenZFile ->
+                    val currentDirEntries = mutableSetOf<String>()
+                    var entry = sevenZFile.nextEntry
+                    while (entry != null) {
+                         val entryName = entry.name.removePrefix("/")
+                         
+                         // Filter entries belonging to the current internal path
+                         // 7z logic similar to Zip logic but streaming entries
+                         if (internalPath.isEmpty()) {
+                            val firstSlash = entryName.indexOf('/')
+                            if (firstSlash == -1) {
+                                if (!currentDirEntries.contains(entryName)) {
                                     results.add(FileModel(
-                                        name = relativeName,
-                                        path = "$zipPath|/$entryName",
+                                        name = entryName,
+                                        path = "$archivePath|/$entryName",
+                                        size = entry.size,
+                                        lastModified = entry.lastModifiedDate?.time ?: 0L,
+                                        isDirectory = entry.isDirectory,
+                                        extension = if (entry.isDirectory) "" else entryName.substringAfterLast('.', ""),
+                                        extraInfo = if (entry.isDirectory) "" else "In 7z"
+                                    ))
+                                    currentDirEntries.add(entryName)
+                                }
+                            } else {
+                                val folderName = entryName.substring(0, firstSlash)
+                                if (!currentDirEntries.contains(folderName)) {
+                                    results.add(FileModel(
+                                        name = folderName,
+                                        path = "$archivePath|/$folderName",
+                                        size = 0,
+                                        lastModified = entry.lastModifiedDate?.time ?: 0L,
+                                        isDirectory = true,
+                                        extraInfo = "In 7z"
+                                    ))
+                                    currentDirEntries.add(folderName)
+                                }
+                            }
+                         } else {
+                            val prefix = "$internalPath/"
+                            if (entryName.startsWith(prefix) && entryName != prefix) {
+                                val relativeName = entryName.removePrefix(prefix)
+                                val firstSlash = relativeName.indexOf('/')
+                                if (firstSlash == -1) {
+                                    if (!currentDirEntries.contains(relativeName)) {
+                                        results.add(FileModel(
+                                            name = relativeName,
+                                            path = "$archivePath|/$entryName",
+                                            size = entry.size,
+                                            lastModified = entry.lastModifiedDate?.time ?: 0L,
+                                            isDirectory = entry.isDirectory,
+                                            extension = if (entry.isDirectory) "" else relativeName.substringAfterLast('.', ""),
+                                            extraInfo = if (entry.isDirectory) "" else "In 7z"
+                                        ))
+                                        currentDirEntries.add(relativeName)
+                                    }
+                                } else {
+                                    val folderName = relativeName.substring(0, firstSlash)
+                                    if (!currentDirEntries.contains(folderName)) {
+                                        results.add(FileModel(
+                                            name = folderName,
+                                            path = "$archivePath|/$internalPath/$folderName",
+                                            size = 0,
+                                            lastModified = entry.lastModifiedDate?.time ?: 0L,
+                                            isDirectory = true,
+                                            extraInfo = "In 7z"
+                                        ))
+                                        currentDirEntries.add(folderName)
+                                    }
+                                }
+                            }
+                         }
+                        entry = sevenZFile.nextEntry
+                    }
+                }
+            } else if (extension == "zip" || extension == "jar") {
+                org.apache.commons.compress.archivers.zip.ZipFile(file).use { zip ->
+                    val entries = zip.entries
+                    val currentDirEntries = mutableSetOf<String>()
+
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        val entryName = entry.name.removePrefix("/")
+                        
+                        if (internalPath.isEmpty()) {
+                            val firstSlash = entryName.indexOf('/')
+                            if (firstSlash == -1) {
+                                if (!currentDirEntries.contains(entryName)) {
+                                    results.add(FileModel(
+                                        name = entryName,
+                                        path = "$archivePath|/$entryName",
                                         size = entry.size,
                                         lastModified = entry.time,
                                         isDirectory = entry.isDirectory,
-                                        extension = if (entry.isDirectory) "" else relativeName.substringAfterLast('.', ""),
-                                        extraInfo = if (entry.isDirectory) "" else "In Archive"
+                                        extension = if (entry.isDirectory) "" else entryName.substringAfterLast('.', ""),
+                                        extraInfo = if (entry.isDirectory) "" else "In Zip"
                                     ))
-                                    currentDirEntries.add(relativeName)
+                                    currentDirEntries.add(entryName)
                                 }
                             } else {
-                                // Subfolder
-                                val folderName = relativeName.substring(0, firstSlash)
-                                 if (!currentDirEntries.contains(folderName)) {
+                                val folderName = entryName.substring(0, firstSlash)
+                                if (!currentDirEntries.contains(folderName)) {
                                     results.add(FileModel(
                                         name = folderName,
-                                        path = "$zipPath|/$internalPath/$folderName",
+                                        path = "$archivePath|/$folderName",
                                         size = 0,
                                         lastModified = entry.time,
                                         isDirectory = true,
-                                        extraInfo = "In Archive"
+                                        extraInfo = "In Zip"
                                     ))
                                     currentDirEntries.add(folderName)
+                                }
+                            }
+                        } else {
+                            val prefix = "$internalPath/"
+                            if (entryName.startsWith(prefix) && entryName != prefix) {
+                                val relativeName = entryName.removePrefix(prefix)
+                                val firstSlash = relativeName.indexOf('/')
+                                 if (firstSlash == -1) {
+                                    if (!currentDirEntries.contains(relativeName)) {
+                                        results.add(FileModel(
+                                            name = relativeName,
+                                            path = "$archivePath|/$entryName",
+                                            size = entry.size,
+                                            lastModified = entry.time,
+                                            isDirectory = entry.isDirectory,
+                                            extension = if (entry.isDirectory) "" else relativeName.substringAfterLast('.', ""),
+                                            extraInfo = if (entry.isDirectory) "" else "In Zip"
+                                        ))
+                                        currentDirEntries.add(relativeName)
+                                    }
+                                } else {
+                                    val folderName = relativeName.substring(0, firstSlash)
+                                     if (!currentDirEntries.contains(folderName)) {
+                                        results.add(FileModel(
+                                            name = folderName,
+                                            path = "$archivePath|/$internalPath/$folderName",
+                                            size = 0,
+                                            lastModified = entry.time,
+                                            isDirectory = true,
+                                            extraInfo = "In Zip"
+                                        ))
+                                        currentDirEntries.add(folderName)
+                                    }
                                 }
                             }
                         }
                     }
                 }
+            } else {
+                // RAR support is complex to implement purely with Commons Compress without seekable streams for random access like listing.
+                // We might need to iterate stream for RAR.
+                // For now, returning empty list or "Not supported for browsing" until we add stream-based listing.
             }
+
             results.sortedWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
         } catch (e: Exception) {
             e.printStackTrace()
@@ -688,88 +798,147 @@ class FileRepository {
         }
     }
 
-    suspend fun zipFiles(paths: List<String>, zipPath: String, onProgress: (Float) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
+    suspend fun createArchive(paths: List<String>, archivePath: String, onProgress: (Float) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
         try {
-            val destFile = File(zipPath)
-            val filesToZip = paths.map { File(it) }
-            val totalSize = filesToZip.sumOf { 
-                if (it.isDirectory) it.walkTopDown().filter { f -> f.isFile }.map { f -> f.length() }.sum() 
-                else it.length() 
-            }
-            var bytesProcessed = 0L
-
-            // Using standard Java ZipOutputStream for creation as Commons Compress ZipFile is for reading
-            java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(destFile))).use { zos ->
-                 filesToZip.forEach { file ->
-                    val rootPath = file.parentFile?.absolutePath ?: ""
-                    
-                    file.walkTopDown().forEach { child ->
-                        val entryName = child.absolutePath.substring(rootPath.length + 1)
-                        if (child.isDirectory) {
-                            zos.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
-                            zos.closeEntry()
-                        } else {
-                            zos.putNextEntry(java.util.zip.ZipEntry(entryName))
-                            child.inputStream().use { input ->
-                                val buffer = ByteArray(4096)
-                                var len = input.read(buffer)
-                                while (len > 0) {
-                                    yield()
-                                    zos.write(buffer, 0, len)
-                                    bytesProcessed += len
-                                    onProgress(if (totalSize > 0) bytesProcessed.toFloat() / totalSize else 0f)
-                                    len = input.read(buffer)
+            val destFile = File(archivePath)
+            val extension = destFile.extension.lowercase()
+            
+            if (extension == "7z") {
+                 org.apache.commons.compress.archivers.sevenz.SevenZOutputFile(destFile).use { sevenZOutput ->
+                     val filesToZip = paths.map { File(it) }
+                     filesToZip.forEach { file ->
+                        val rootPath = file.parentFile?.absolutePath ?: ""
+                        file.walkTopDown().forEach { child ->
+                            val entryName = if (child.absolutePath == file.absolutePath) file.name else child.absolutePath.substring(rootPath.length + 1)
+                            val entry = sevenZOutput.createArchiveEntry(child, entryName)
+                            sevenZOutput.putArchiveEntry(entry)
+                            if (child.isFile) {
+                                child.inputStream().use { input ->
+                                    val buffer = ByteArray(4096)
+                                    var len = input.read(buffer)
+                                    while (len > 0) {
+                                        sevenZOutput.write(buffer, 0, len)
+                                        len = input.read(buffer)
+                                    }
                                 }
                             }
-                            zos.closeEntry()
+                            sevenZOutput.closeArchiveEntry()
                         }
                     }
                  }
+                 true
+            } else {
+                // Default Zip
+                val filesToZip = paths.map { File(it) }
+                val totalSize = filesToZip.sumOf { 
+                    if (it.isDirectory) it.walkTopDown().filter { f -> f.isFile }.map { f -> f.length() }.sum() 
+                    else it.length() 
+                }
+                var bytesProcessed = 0L
+
+                java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(destFile))).use { zos ->
+                     filesToZip.forEach { file ->
+                        val rootPath = file.parentFile?.absolutePath ?: ""
+                        
+                        file.walkTopDown().forEach { child ->
+                            val entryName = child.absolutePath.substring(rootPath.length + 1)
+                            if (child.isDirectory) {
+                                zos.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
+                                zos.closeEntry()
+                            } else {
+                                zos.putNextEntry(java.util.zip.ZipEntry(entryName))
+                                child.inputStream().use { input ->
+                                    val buffer = ByteArray(4096)
+                                    var len = input.read(buffer)
+                                    while (len > 0) {
+                                        yield()
+                                        zos.write(buffer, 0, len)
+                                        bytesProcessed += len
+                                        onProgress(if (totalSize > 0) bytesProcessed.toFloat() / totalSize else 0f)
+                                        len = input.read(buffer)
+                                    }
+                                }
+                                zos.closeEntry()
+                            }
+                        }
+                     }
+                }
+                true
             }
-            true
         } catch (e: Exception) {
             e.printStackTrace()
             false
         }
     }
 
-    suspend fun unzipFile(zipPath: String, destPath: String, onProgress: (Float) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
+    suspend fun extractArchive(archivePath: String, destPath: String, onProgress: (Float) -> Unit = {}): Boolean = withContext(Dispatchers.IO) {
         try {
-            val zipFile = File(zipPath)
+            val archiveFile = File(archivePath)
             val destDir = File(destPath)
             if (!destDir.exists()) destDir.mkdirs()
+            val extension = archiveFile.extension.lowercase()
 
-            org.apache.commons.compress.archivers.zip.ZipFile(zipFile).use { zip ->
-                val entries = zip.entries
-                val totalEntries = zip.entries.asSequence().count().toFloat()
-                var processedEntries = 0
+            if (extension == "7z") {
+                org.apache.commons.compress.archivers.sevenz.SevenZFile(archiveFile).use { sevenZFile ->
+                    // Count entries for progress? 7z doesn't give total entries upfront easily without iteration.
+                    // We'll just do indeterminate or 1.0 at end.
+                    var entry = sevenZFile.nextEntry
+                    while (entry != null) {
+                        yield()
+                        val entryFile = File(destDir, entry.name)
+                        if (entry.isDirectory) {
+                            entryFile.mkdirs()
+                        } else {
+                            entryFile.parentFile?.mkdirs()
+                            // SevenZFile.read() reads current entry
+                            val content = ByteArray(entry.size.toInt())
+                            var offset = 0
+                            while (offset < content.size) {
+                                val read = sevenZFile.read(content, offset, content.size - offset)
+                                if (read == -1) break
+                                offset += read
+                            }
+                            entryFile.writeBytes(content)
+                        }
+                        entry = sevenZFile.nextEntry
+                    }
+                }
+                onProgress(1.0f)
+                true
+            } else {
+                // Default to Zip
+                org.apache.commons.compress.archivers.zip.ZipFile(archiveFile).use { zip ->
+                    val entries = zip.entries
+                    val totalEntries = zip.entries.asSequence().count().toFloat()
+                    var processedEntries = 0
 
-                while (entries.hasMoreElements()) {
-                    yield()
-                    val entry = entries.nextElement()
-                    val entryFile = File(destDir, entry.name)
-                    
-                    if (entry.isDirectory) {
-                        entryFile.mkdirs()
-                    } else {
-                        entryFile.parentFile?.mkdirs()
-                        zip.getInputStream(entry).use { input ->
-                            entryFile.outputStream().use { output ->
-                                val buffer = ByteArray(8192)
-                                var len = input.read(buffer)
-                                while (len > 0) {
-                                    yield()
-                                    output.write(buffer, 0, len)
-                                    len = input.read(buffer)
+                    while (entries.hasMoreElements()) {
+                        yield()
+                        val entry = entries.nextElement()
+                        val entryFile = File(destDir, entry.name)
+                        
+                        if (entry.isDirectory) {
+                            entryFile.mkdirs()
+                        } else {
+                            entryFile.parentFile?.mkdirs()
+                            zip.getInputStream(entry).use { input ->
+                                entryFile.outputStream().use { output ->
+                                    val buffer = ByteArray(8192)
+                                    var len = input.read(buffer)
+                                    while (len > 0) {
+                                        yield()
+                                        output.write(buffer, 0, len)
+                                        len = input.read(buffer)
+                                    }
                                 }
                             }
                         }
+                        processedEntries++
+                        onProgress(processedEntries / totalEntries)
                     }
-                    processedEntries++
-                    onProgress(processedEntries / totalEntries)
                 }
+                true
             }
-            true
         } catch (e: Exception) {
             e.printStackTrace()
             false

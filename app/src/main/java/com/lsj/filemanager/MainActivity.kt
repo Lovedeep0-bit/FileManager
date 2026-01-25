@@ -69,6 +69,15 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                         val navController = rememberNavController()
+                        
+                        val initialRoute = remember {
+                            if (intent?.action == Intent.ACTION_VIEW && intent.data != null) {
+                                "viewer?uri=${android.net.Uri.encode(intent.data.toString())}&external=true"
+                            } else {
+                                "explorer"
+                            }
+                        }
+
                         val context = LocalContext.current
                         val versionName = remember {
                             try {
@@ -176,7 +185,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                                     )
-
+ 
                                     NavigationDrawerItem(
                                         icon = { Icon(Icons.Default.Lock, contentDescription = null) },
                                         label = { Text("Locker") },
@@ -187,7 +196,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                                     )
-
+ 
                                     Spacer(Modifier.weight(1f))
                                     Text(
                                         text = "v$versionName",
@@ -203,19 +212,31 @@ class MainActivity : ComponentActivity() {
                     ) {
                         NavHost(
                             navController = navController, 
-                            startDestination = "explorer",
+                            startDestination = initialRoute,
                             enterTransition = { slideInHorizontally(initialOffsetX = { 1000 }) + fadeIn() },
                             exitTransition = { slideOutHorizontally(targetOffsetX = { -1000 }) + fadeOut() },
                             popEnterTransition = { slideInHorizontally(initialOffsetX = { -1000 }) + fadeIn() },
                             popExitTransition = { slideOutHorizontally(targetOffsetX = { 1000 }) + fadeOut() }
                         ) {
-                        composable("viewer?path={path}") { backStackEntry ->
-                            val path = backStackEntry.arguments?.getString("path") ?: return@composable
-                            DocumentViewerScreen(
-                                path = android.net.Uri.decode(path),
-                                onNavigateBack = { navController.popBackStack() }
-                            )
-                        }
+                            composable(
+                                "viewer?uri={uri}&external={external}",
+                                arguments = listOf(
+                                    navArgument("uri") { type = NavType.StringType },
+                                    navArgument("external") { 
+                                        type = NavType.BoolType
+                                        defaultValue = false 
+                                    }
+                                )
+                            ) { backStackEntry ->
+                                val uriStr = backStackEntry.arguments?.getString("uri") ?: return@composable
+                                val isExternal = backStackEntry.arguments?.getBoolean("external") ?: false
+                                DocumentViewerScreen(
+                                    uriStr = android.net.Uri.decode(uriStr),
+                                    onNavigateBack = { 
+                                        if (isExternal) finish() else navController.popBackStack() 
+                                    }
+                                )
+                            }
                             composable(
                                 route = "explorer?category={category}",
                                 arguments = listOf(
@@ -242,7 +263,8 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.open() }
                                     },
                                     onViewFile = { file ->
-                                        navController.navigate("viewer?path=${android.net.Uri.encode(file.path)}")
+                                        val uri = android.net.Uri.fromFile(java.io.File(file.path)).toString()
+                                        navController.navigate("viewer?uri=${android.net.Uri.encode(uri)}")
                                     }
                                 )
                             }
@@ -253,7 +275,8 @@ class MainActivity : ComponentActivity() {
                                     onNavigateBack = { finish() },
                                     onMenuClick = { scope.launch { drawerState.open() } },
                                     onViewFile = { file ->
-                                        navController.navigate("viewer?path=${android.net.Uri.encode(file.path)}")
+                                        val uri = android.net.Uri.fromFile(java.io.File(file.path)).toString()
+                                        navController.navigate("viewer?uri=${android.net.Uri.encode(uri)}")
                                     }
                                 )
                             }
@@ -277,7 +300,8 @@ class MainActivity : ComponentActivity() {
                                 com.lsj.filemanager.ui.screens.LockerScreen(
                                     onNavigateBack = { navController.popBackStack() },
                                     onViewFile = { path ->
-                                        navController.navigate("viewer?path=${android.net.Uri.encode(path)}")
+                                        val uri = android.net.Uri.fromFile(java.io.File(path)).toString()
+                                        navController.navigate("viewer?uri=${android.net.Uri.encode(uri)}")
                                     }
                                 )
                             }

@@ -51,8 +51,47 @@
             android:theme="@style/Theme.FileManager">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Intent Filter to open Images -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+
+            <!-- Intent Filter to open PDFs -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+
+            <!-- Intent Filter to open Text/Code files -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="text/*" />
+            </intent-filter>
+
+            <!-- Intent Filter for files without specific MIME but common extensions -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\.txt" />
+                <data android:pathPattern=".*\\.kt" />
+                <data android:pathPattern=".*\\.java" />
+                <data android:pathPattern=".*\\.py" />
+                <data android:pathPattern=".*\\.js" />
             </intent-filter>
         </activity>
     </application>

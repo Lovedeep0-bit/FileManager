@@ -31,25 +31,62 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import androidx.compose.animation.*
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DocumentViewerScreen(path: String, onNavigateBack: () -> Unit) {
+fun DocumentViewerScreen(uriStr: String, onNavigateBack: () -> Unit) {
     val context = LocalContext.current
-    val file = remember(path) { File(path) }
-    val extension = file.extension.lowercase()
+    val uri = remember(uriStr) { android.net.Uri.parse(uriStr) }
+    
+    // Extract metadata
+    val metadata = remember(uri) {
+        var name = "File"
+        var extension = ""
+        
+        if (uri.scheme == "file") {
+            val file = File(uri.path ?: "")
+            name = file.name
+            extension = file.extension.lowercase()
+        } else if (uri.scheme == "content") {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    name = cursor.getString(nameIndex)
+                    extension = name.substringAfterLast(".", "").lowercase()
+                }
+            }
+            // Fallback: Infer from MIME if possible (not always available here)
+            if (extension.isEmpty()) {
+                val mime = context.contentResolver.getType(uri)
+                extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: ""
+            }
+        }
+        name to extension
+    }
+    
+    val fileName = metadata.first
+    val extension = metadata.second
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { 
                     Text(
-                        file.name,
+                        fileName,
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 1
                     ) 
@@ -60,7 +97,7 @@ fun DocumentViewerScreen(path: String, onNavigateBack: () -> Unit) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { shareFile(context, file) }) {
+                    IconButton(onClick = { shareUri(context, uri, extension) }) {
                         Icon(Icons.Default.Share, contentDescription = "Share")
                     }
                 },
@@ -77,12 +114,13 @@ fun DocumentViewerScreen(path: String, onNavigateBack: () -> Unit) {
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .background(if (extension == "pdf") Color.Gray else MaterialTheme.colorScheme.background)
+                .background(if (extension == "pdf") Color.Gray else if (listOf("jpg", "jpeg", "png", "webp", "gif", "bmp").contains(extension)) Color.Black else MaterialTheme.colorScheme.background)
         ) {
-            when (extension) {
-                "pdf" -> PdfViewer(file)
-                "jpg", "jpeg", "png", "webp", "gif", "bmp" -> ImageViewer(file)
-                "txt", "log", "json", "xml", "csv", "kt", "java", "py", "html", "css", "js" -> TextViewer(file)
+            val textExtensions = listOf("txt", "log", "json", "xml", "csv", "kt", "java", "py", "html", "css", "js", "md", "gradle", "properties", "yaml", "yml", "sql")
+            when {
+                extension == "pdf" -> PdfViewer(uri)
+                listOf("jpg", "jpeg", "png", "webp", "gif", "bmp").contains(extension) -> ImageViewer(uri)
+                textExtensions.contains(extension) -> TextViewer(uri, extension)
                 else -> {
                     Column(
                         modifier = Modifier.fillMaxSize(),
@@ -91,7 +129,7 @@ fun DocumentViewerScreen(path: String, onNavigateBack: () -> Unit) {
                     ) {
                         Text("Unsupported file type")
                         Spacer(Modifier.height(16.dp))
-                        Button(onClick = { openWithExternal(context, file) }) {
+                        Button(onClick = { openWithExternalUri(context, uri, extension) }) {
                             Text("Open with external app")
                         }
                     }
@@ -102,14 +140,17 @@ fun DocumentViewerScreen(path: String, onNavigateBack: () -> Unit) {
 }
 
 @Composable
-fun PdfViewer(file: File) {
+fun PdfViewer(uri: android.net.Uri) {
     var pageCount by remember { mutableStateOf(0) }
     val pdfMutex = remember { Mutex() }
+    val context = LocalContext.current
     
-    val renderer = remember(file) {
+    val renderer = remember(uri) {
         try {
-            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            PdfRenderer(pfd).also { pageCount = it.pageCount }
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                PdfRenderer(pfd).also { pageCount = it.pageCount }
+            } else null
         } catch (e: Exception) {
             null
         }
@@ -196,20 +237,26 @@ fun PdfPage(renderer: PdfRenderer, index: Int, screenWidth: Int, mutex: Mutex) {
 }
 
 @Composable
-fun TextViewer(file: File) {
+fun TextViewer(uri: android.net.Uri, extension: String) {
     var content by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    val context = LocalContext.current
 
-    LaunchedEffect(file) {
+    LaunchedEffect(uri) {
         withContext(Dispatchers.IO) {
             try {
-                content = file.readText()
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    content = input.bufferedReader().readText()
+                }
             } catch (e: Exception) {
                 content = "Error reading file: ${e.message}"
             }
             isLoading = false
         }
     }
+
+    val monospaceExtensions = listOf("json", "xml", "kt", "java", "py", "html", "css", "js", "gradle", "properties", "yaml", "yml", "sql")
+    val isMonospace = extension in monospaceExtensions
 
     if (isLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -225,7 +272,7 @@ fun TextViewer(file: File) {
             SelectionContainer {
                 Text(
                     text = content ?: "",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = if (isMonospace) MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace) else MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
             }
@@ -233,11 +280,10 @@ fun TextViewer(file: File) {
     }
 }
 
-private fun shareFile(context: android.content.Context, file: File) {
+private fun shareUri(context: android.content.Context, uri: android.net.Uri, extension: String) {
     try {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -247,10 +293,9 @@ private fun shareFile(context: android.content.Context, file: File) {
     }
 }
 
-private fun openWithExternal(context: android.content.Context, file: File) {
+private fun openWithExternalUri(context: android.content.Context, uri: android.net.Uri, extension: String) {
     try {
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
-        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeType)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -262,16 +307,51 @@ private fun openWithExternal(context: android.content.Context, file: File) {
     }
 }
 @Composable
-fun ImageViewer(file: File) {
+fun ImageViewer(uri: android.net.Uri) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    scale = (scale * zoom).coerceIn(1f, 5f)
+                    if (scale > 1f) {
+                        offset += pan
+                    } else {
+                        offset = Offset.Zero
+                    }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(
-            model = file,
+            model = uri,
             contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y
+                ),
             contentScale = ContentScale.Fit
         )
+        
+        if (scale > 1f) {
+            IconButton(
+                onClick = { 
+                    scale = 1f
+                    offset = Offset.Zero
+                },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color.Black.copy(alpha = 0.5f))
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Reset", tint = Color.White)
+            }
+        }
     }
 }

@@ -139,11 +139,11 @@ class ExplorerViewModel(application: Application) : AndroidViewModel(application
                 val parts = path.split("|")
                 val zipPath = parts[0]
                 val internalPath = if (parts.size > 1) parts[1].trimStart('/') else ""
-                _files.value = repository.listZipContents(zipPath, internalPath)
+                _files.value = repository.listArchiveContents(zipPath, internalPath)
             } else {
                 val file = File(path)
-                if (file.isFile && file.extension.lowercase() == "zip") {
-                    _files.value = repository.listZipContents(path, "")
+                if (file.isFile && (file.extension.lowercase() in listOf("zip", "7z", "rar", "jar"))) {
+                    _files.value = repository.listArchiveContents(path, "")
                 } else {
                     _files.value = repository.listFiles(path, settingsRepository.showHiddenFiles.value)
                 }
@@ -426,10 +426,11 @@ class ExplorerViewModel(application: Application) : AndroidViewModel(application
             _operationStatus.value = "Creating archive $name..."
             
             val firstFile = files.firstOrNull() ?: return@launch
-            val zipName = if (name.endsWith(".zip")) name else "$name.zip"
+            // If name has no extension, default to zip. If it has .7z, use that.
+            val zipName = if (name.contains(".")) name else "$name.zip"
             val zipPath = File(_currentPath.value, zipName).absolutePath
             
-            repository.zipFiles(files.map { it.path }, zipPath) { _progress.value = it }
+            repository.createArchive(files.map { it.path }, zipPath) { _progress.value = it }
             
             _operationStatus.value = null
             clearSelection()
@@ -476,7 +477,7 @@ class ExplorerViewModel(application: Application) : AndroidViewModel(application
             }
             
             _operationStatus.value = "Extracting ${file.name}..."
-            repository.unzipFile(file.path, targetDir!!) { _progress.value = it }
+            repository.extractArchive(file.path, targetDir!!) { _progress.value = it }
             
             _operationStatus.value = null
             loadFiles(_currentPath.value)
@@ -509,9 +510,9 @@ class ExplorerViewModel(application: Application) : AndroidViewModel(application
             _progress.value = 0f
             _operationStatus.value = "Compressing..."
             
-            val nameWithExt = if (name.endsWith(".zip")) name else "$name.zip"
+            val nameWithExt = if (name.contains(".")) name else "$name.zip"
             val zipPath = File(_currentPath.value, nameWithExt).absolutePath
-            repository.zipFiles(filesToArchive.map { it.path }, zipPath) { _progress.value = it }
+            repository.createArchive(filesToArchive.map { it.path }, zipPath) { _progress.value = it }
             
             _operationStatus.value = null
             _isLoading.value = false
@@ -587,6 +588,10 @@ class ExplorerViewModel(application: Application) : AndroidViewModel(application
             loadFiles(_currentPath.value)
             _isLoading.value = false
         }
+    }
+
+    suspend fun getDetailedMetadata(file: FileModel): FileModel {
+        return repository.getDetailedMetadata(file)
     }
 }
 

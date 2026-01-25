@@ -18,6 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lsj.filemanager.ui.components.FileItem
 import com.lsj.filemanager.ui.explorer.ExplorerViewModel
+import kotlinx.coroutines.launch
 
 import androidx.compose.ui.platform.LocalContext
 import android.content.Intent
@@ -49,6 +50,7 @@ fun ExplorerScreen(
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val scope = rememberCoroutineScope()
     val currentPath by viewModel.currentPath.collectAsState()
     val currentCategory by viewModel.currentCategory.collectAsState()
     val currentAppTab by viewModel.currentAppTab.collectAsState()
@@ -253,111 +255,131 @@ fun ExplorerScreen(
             }
         },
         floatingActionButton = {
-            Column(horizontalAlignment = Alignment.End) {
-                if (clipboard != null && !isSearching && currentCategory == null) {
-                    ExtendedFloatingActionButton(
-                        text = { Text("Paste") },
-                        icon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
-                        onClick = { viewModel.paste() },
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-                if (!isSearching && currentCategory == null) {
-                    var isExpanded by remember { mutableStateOf(false) }
-                    var showCreateFolder by remember { mutableStateOf(false) }
-                    var showCreateFile by remember { mutableStateOf(false) }
-                    
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.padding(bottom = 8.dp)
+            if (isPickingDestination) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp, start = 24.dp, end = 24.dp)
+                        .navigationBarsPadding(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(28.dp),
+                        tonalElevation = 8.dp,
+                        color = MaterialTheme.colorScheme.surfaceColorAtElevation(12.dp),
+                        shadowElevation = 12.dp,
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, 
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
                     ) {
-                        if (isExpanded) {
-                            SmallFloatingActionButton(
-                                onClick = { 
-                                    showCreateFile = true
-                                    isExpanded = false
-                                },
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                            ) {
-                                Icon(Icons.Default.InsertDriveFile, contentDescription = "New File")
+                        Row(
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Select Destination",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { viewModel.cancelPicking() }) {
+                                    Text("CANCEL")
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                Button(
+                                    onClick = { viewModel.confirmUnzipDestination() },
+                                    shape = RoundedCornerShape(16.dp),
+                                    contentPadding = PaddingValues(horizontal = 24.dp)
+                                ) {
+                                    Text("OK")
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.End) {
+                    if (clipboard != null && !isSearching && currentCategory == null) {
+                        ExtendedFloatingActionButton(
+                            text = { Text("Paste") },
+                            icon = { Icon(Icons.Default.ContentPaste, contentDescription = null) },
+                            onClick = { viewModel.paste() },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    if (!isSearching && currentCategory == null) {
+                        var isExpanded by remember { mutableStateOf(false) }
+                        var showCreateFolder by remember { mutableStateOf(false) }
+                        var showCreateFile by remember { mutableStateOf(false) }
+                        
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            if (isExpanded) {
+                                SmallFloatingActionButton(
+                                    onClick = { 
+                                        showCreateFile = true
+                                        isExpanded = false
+                                    },
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ) {
+                                    Icon(Icons.Default.InsertDriveFile, contentDescription = "New File")
+                                }
+                                
+                                SmallFloatingActionButton(
+                                    onClick = { 
+                                        showCreateFolder = true 
+                                        isExpanded = false
+                                    },
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ) {
+                                    Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
+                                }
                             }
                             
-                            SmallFloatingActionButton(
-                                onClick = { 
-                                    showCreateFolder = true 
-                                    isExpanded = false
-                                },
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            
+                            FloatingActionButton(
+                                onClick = { isExpanded = !isExpanded },
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                             ) {
-                                Icon(Icons.Default.CreateNewFolder, contentDescription = "New Folder")
+                                Icon(
+                                    if (isExpanded) Icons.Default.Close else Icons.Default.Add,
+                                    contentDescription = if (isExpanded) "Close" else "Add"
+                                )
                             }
                         }
                         
-                        
-                        FloatingActionButton(
-                            onClick = { isExpanded = !isExpanded },
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ) {
-                            Icon(
-                                if (isExpanded) Icons.Default.Close else Icons.Default.Add,
-                                contentDescription = if (isExpanded) "Close" else "Add"
+                        if (showCreateFolder) {
+                            InputDialog(
+                                title = "New Folder",
+                                onConfirm = { 
+                                    viewModel.createFolder(it)
+                                    showCreateFolder = false
+                                },
+                                onDismiss = { showCreateFolder = false }
                             )
                         }
-                    }
-                    
-                    if (showCreateFolder) {
-                        InputDialog(
-                            title = "New Folder",
-                            onConfirm = { 
-                                viewModel.createFolder(it)
-                                showCreateFolder = false
-                            },
-                            onDismiss = { showCreateFolder = false }
-                        )
-                    }
-                    
-                    if (showCreateFile) {
-                        InputDialog(
-                            title = "New File",
-                            onConfirm = { 
-                                viewModel.createFile(it)
-                                showCreateFile = false
-                            },
-                            onDismiss = { showCreateFile = false }
-                        )
-                    }
-                }
-            }
-
-            if (isPickingDestination) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    tonalElevation = 8.dp,
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Select Destination",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                        Row {
-                            TextButton(onClick = { viewModel.cancelPicking() }) {
-                                Text("CANCEL", color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Button(onClick = { viewModel.confirmUnzipDestination() }) {
-                                Text("OK")
-                            }
+                        
+                        if (showCreateFile) {
+                            InputDialog(
+                                title = "New File",
+                                onConfirm = { 
+                                    viewModel.createFile(it)
+                                    showCreateFile = false
+                                },
+                                onDismiss = { showCreateFile = false }
+                            )
                         }
                     }
                 }
@@ -464,6 +486,7 @@ fun ExplorerScreen(
                         items = displayFiles,
                         key = { it.path }
                     ) { file ->
+                        val isInArchive = file.path.contains("|")
                         FileItem(
                             modifier = Modifier.animateItem(),
                             file = file,
@@ -471,9 +494,17 @@ fun ExplorerScreen(
                             onClick = {
                                 focusManager.clearFocus()
                                 if (selectedFiles.isNotEmpty()) {
-                                    viewModel.toggleSelection(file)
+                                    if (!isInArchive) viewModel.toggleSelection(file)
                                 } else {
                                     when {
+                                        // Handle archive navigation
+                                        isInArchive -> {
+                                            if (file.isDirectory) {
+                                                viewModel.loadFiles(file.path)
+                                            } else {
+                                                Toast.makeText(context, "Archive item cannot be opened", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
                                         // Open app info page for installed apps
                                         file.appIconPackageName != null -> {
                                             try {
@@ -506,15 +537,19 @@ fun ExplorerScreen(
                                             }
                                         }
                                         // Navigate into directories or browse zips
-                                        file.isDirectory || file.extension.lowercase() == "zip" -> {
+                                        file.isDirectory || file.extension.lowercase() in listOf("zip", "7z", "rar", "jar") -> {
                                             viewModel.loadFiles(file.path)
                                         }
-                                        // For other files, try to open them
+                                        // For other files, try to open them internally if supported
                                         else -> {
                                             val ext = file.extension.lowercase()
-                                            val docExtensions = listOf("pdf", "txt", "log", "json", "xml", "csv", "kt", "java", "py", "html", "css", "js")
+                                            val supportedExtensions = listOf(
+                                                "pdf", "txt", "log", "json", "xml", "csv", "kt", "java", "py", "html", "css", "js", 
+                                                "md", "gradle", "properties", "yaml", "yml", "sql",
+                                                "jpg", "jpeg", "png", "webp", "gif", "bmp"
+                                            )
                                             
-                                            if (ext in docExtensions) {
+                                            if (ext in supportedExtensions) {
                                                 onViewFile(file)
                                             } else {
                                                 try {
@@ -544,8 +579,8 @@ fun ExplorerScreen(
                                     }
                                 }
                             },
-                             onLongClick = { contextMenuFile = file },
-                             onIconClick = { viewModel.toggleSelection(file) }
+                             onLongClick = { if (!isInArchive) contextMenuFile = file },
+                             onIconClick = { if (!isInArchive) viewModel.toggleSelection(file) }
                         )
                     }
                     if (displayFiles.isEmpty()) {
@@ -614,7 +649,11 @@ fun ExplorerScreen(
                         FileAction.EXTRACT_TO_FOLDER -> viewModel.unzip(file, mode = "FOLDER")
                         FileAction.EXTRACT_TO_CUSTOM -> viewModel.unzip(file, mode = "PICK")
                         FileAction.OPEN_AS_ARCHIVE -> viewModel.loadFiles(file.path)
-                        FileAction.INFORMATION -> showInfoDialog = file
+                        FileAction.INFORMATION -> {
+                            scope.launch {
+                                showInfoDialog = viewModel.getDetailedMetadata(file)
+                            }
+                        }
                         FileAction.APP_INFO -> {
                             val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = android.net.Uri.parse("package:${file.packageName}")
@@ -684,7 +723,7 @@ fun ExplorerScreen(
     }
 
 
-        // ModalBottomSheet for single file context menu removed
+
         
         if (showDeleteDialog && filesToDelete.isNotEmpty()) {
             AlertDialog(
