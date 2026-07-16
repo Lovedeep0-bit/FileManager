@@ -1,26 +1,27 @@
 # FileManager
 
-A clean, modern file manager for Android focusing on privacy and smooth organization.
+A clean, fast, and modern file manager for Android focusing on smooth organization and deep privacy.
 
 ## Features
 
-- **Secure Locker**: Protect files with a 4-digit PIN. Locked files are stored in a hidden directory.
-- **Smart Restore**: Files return to their original location when unlocked.
-- **Internal Viewer**: View images and PDFs securely within the app.
-- **File Operations**: Full support for Copy, Move, Delete, Rename, and Share.
-- **Archive Support**: Create and extract ZIP archives.
-- **App Manager**: Manage installed apps and automated cache cleaning.
-- **Customizable UI**: Choose between Light, Dark, and OLED themes.
+- **Modern UI**: Completely overhauled with Material 3 Expressive design, featuring dynamic layouts and deeply integrated, buttery smooth list animations across the app.
+- **Storage Analyzer**: Quickly visualize disk usage, clear up large files, and find heavy caches to instantly recover storage space.
+- **Robust File Operations**: Exceptionally fast file transfers backed by chunked buffered streams and deeply integrated automatic MediaStore synchronization.
+- **Secure Locker**: Protect personal files with a 4-digit PIN. Locked files are encrypted in a hidden local directory.
+- **Smart Restore**: Locked files automatically remember and return to their original locations when unlocked.
+- **Rich Media Viewer**: View images, documents, configuration files, and code securely within the app. Advanced physics-based zooming for images.
+- **App Manager**: Manage installed apps with automated, one-tap cache cleaning.
+- **Customizable Themes**: Choose between Light, Dark, and OLED pure black themes.
 
 ## Installation
 
 - Requires Android 7.0 (API 24) or higher.
-- Grant **All Files Access** and **Accessibility Service** for full functionality.
+- Grant **All Files Access** and **Accessibility Service** for full functionality (Accessibility is used for automated cache clearing).
 
 ## Privacy
 
 - All data is stored locally on your device.
-- No external tracking or server storage.
+- Zero external tracking or server storage.
 
 ---
-*Built with Jetpack Compose*
+*Built with modern Jetpack Compose*
